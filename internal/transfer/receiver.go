@@ -36,13 +36,24 @@ func Receive(addr string, outDir string) error {
 	fmt.Printf("receiving %s (%d bytes, %d chunks)\n", manifest.FileName, manifest.FileSize, len(manifest.ChunkHashes))
 
 	outPath := filepath.Join(outDir, manifest.FileName)
-	outFile, err := os.Create(outPath)
+	transferID := manifestTransferID(manifest)
+
+	startIndex := uint32(0)
+	if st, err := loadTransferState(outPath); err == nil && st.TransferID == transferID {
+		startIndex = st.NextIndex
+		fmt.Printf("resuming transfer from chunk %d\n", startIndex)
+	}
+
+	openFlags := os.O_CREATE | os.O_RDWR
+	if startIndex == 0 {
+		openFlags |= os.O_TRUNC
+	}
+	outFile, err := os.OpenFile(outPath, openFlags, 0644)
 	if err != nil {
 		return fmt.Errorf("creating output file: %w", err)
 	}
 	defer outFile.Close()
 
-	startIndex := uint32(0)
 	if err := protocol.WriteFrame(conn, protocol.MsgStartFrom, protocol.EncodeIndex(startIndex)); err != nil {
 		return fmt.Errorf("sending start-from: %w", err)
 	}
@@ -85,9 +96,14 @@ func Receive(addr string, outDir string) error {
 			return fmt.Errorf("writing chunk %d: %w", index, err)
 		}
 
+		if err := saveTransferState(outPath, transferState{TransferID: transferID, NextIndex: index + 1}); err != nil {
+			return fmt.Errorf("saving transfer state: %w", err)
+		}
+
 		fmt.Printf("\rreceived chunk %d/%d", index+1, len(manifest.ChunkHashes))
 	}
 
+	deleteTransferState(outPath)
 	fmt.Println()
 	fmt.Printf("saved to %s\n", outPath)
 	return nil
@@ -103,8 +119,5 @@ func listenForPauseInput(conn net.Conn) {
 		case "r":
 			protocol.WriteFrame(conn, protocol.MsgResume, nil)
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "reading stdin: %v\n", err)
 	}
 }
