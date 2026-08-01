@@ -61,11 +61,21 @@ func Share(filePath string, addr string) error {
 		return fmt.Errorf("sending handshake: %w", err)
 	}
 
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
+	startIndex, err := readStartFrom(conn)
+	if err != nil {
+		return fmt.Errorf("reading start-from: %w", err)
+	}
+
+	startOffset := int64(startIndex) * protocol.ChunkSize
+	if _, err := file.Seek(startOffset, io.SeekStart); err != nil {
 		return fmt.Errorf("seeking file: %w", err)
 	}
 
-	if err := sendChunks(conn, file, len(hashes)); err != nil {
+	gate := newPauseGate()
+	controlErrCh := make(chan error, 1)
+	go listenForControlMessages(conn, gate, controlErrCh)
+
+	if err := sendChunks(conn, file, len(hashes), startIndex, gate); err != nil {
 		return fmt.Errorf("sending chunks: %w", err)
 	}
 
@@ -75,6 +85,35 @@ func Share(filePath string, addr string) error {
 
 	fmt.Println("transfer complete")
 	return nil
+}
+
+func readStartFrom(conn net.Conn) (uint32, error) {
+	msgType, payload, err := protocol.ReadFrame(conn)
+	if err != nil {
+		return 0, err
+	}
+	if msgType != protocol.MsgStartFrom {
+		return 0, fmt.Errorf("expected start-from, got message type %d", msgType)
+	}
+	return protocol.DecodeIndex(payload)
+}
+
+func listenForControlMessages(conn net.Conn, gate *pauseGate, errCh chan<- error) {
+	for {
+		msgType, _, err := protocol.ReadFrame(conn)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		switch msgType {
+		case protocol.MsgPause:
+			fmt.Println("\npeer requested pause")
+			gate.Pause()
+		case protocol.MsgResume:
+			fmt.Println("\npeer requested resume")
+			gate.Resume()
+		}
+	}
 }
 
 func computeChunkHashes(file *os.File, size int64) ([]string, error) {
@@ -98,13 +137,14 @@ func computeChunkHashes(file *os.File, size int64) ([]string, error) {
 	return hashes, nil
 }
 
-func sendChunks(conn net.Conn, file *os.File, totalChunks int) error {
+func sendChunks(conn net.Conn, file *os.File, totalChunks int, startIndex uint32, gate *pauseGate) error {
 	buf := make([]byte, protocol.ChunkSize)
-	index := uint32(0)
+	index := startIndex
 
 	for {
 		n, err := file.Read(buf)
 		if n > 0 {
+			gate.WaitIfPaused()
 			payload := protocol.EncodeChunk(index, buf[:n])
 			if writeErr := protocol.WriteFrame(conn, protocol.MsgChunk, payload); writeErr != nil {
 				return writeErr

@@ -1,12 +1,14 @@
 package transfer
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"raft/internal/protocol"
 )
@@ -39,6 +41,14 @@ func Receive(addr string, outDir string) error {
 		return fmt.Errorf("creating output file: %w", err)
 	}
 	defer outFile.Close()
+
+	startIndex := uint32(0)
+	if err := protocol.WriteFrame(conn, protocol.MsgStartFrom, protocol.EncodeIndex(startIndex)); err != nil {
+		return fmt.Errorf("sending start-from: %w", err)
+	}
+
+	fmt.Println("type 'p' + enter to pause, 'r' + enter to resume")
+	go listenForPauseInput(conn)
 
 	for {
 		msgType, payload, err := protocol.ReadFrame(conn)
@@ -81,4 +91,20 @@ func Receive(addr string, outDir string) error {
 	fmt.Println()
 	fmt.Printf("saved to %s\n", outPath)
 	return nil
+}
+
+func listenForPauseInput(conn net.Conn) {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		switch line {
+		case "p":
+			protocol.WriteFrame(conn, protocol.MsgPause, nil)
+		case "r":
+			protocol.WriteFrame(conn, protocol.MsgResume, nil)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "reading stdin: %v\n", err)
+	}
 }

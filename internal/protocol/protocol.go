@@ -12,6 +12,9 @@ const (
 	MsgChunk
 	MsgComplete
 	MsgError
+	MsgStartFrom
+	MsgPause
+	MsgResume
 )
 
 const ChunkSize = 4 * 1024 * 1024
@@ -82,4 +85,17 @@ func DecodeChunk(payload []byte) (uint32, []byte, error) {
 	}
 	index := binary.BigEndian.Uint32(payload[0:4])
 	return index, payload[4:], nil
+}
+
+func EncodeIndex(index uint32) []byte {
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, index)
+	return buf
+}
+
+func DecodeIndex(payload []byte) (uint32, error) {
+	if len(payload) != 4 {
+		return 0, errors.New("protocol: index payload must be 4 bytes")
+	}
+	return binary.BigEndian.Uint32(payload), nil
 }
