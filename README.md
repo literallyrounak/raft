@@ -1,53 +1,143 @@
 # raft
 
-Direct device-to-device file transfer over TCP. No cloud upload, no size limits, no compression - the file goes straight from one machine to the other.
+A small CLI for transferring files directly between two machines over TCP.
+
+Run `share` on one machine, `receive` on the other, and the file streams straight from sender to receiver. No cloud upload, no accounts, and no file size limits.
+
+Transfers can be paused while they're running and resumed after a disconnect without retransferring data that's already been verified.
+
+---
+
+## Features
+
+* Direct peer-to-peer file transfer over a single TCP connection
+* Resume interrupted transfers from the last verified chunk
+* Pause and resume an active transfer from the receiver
+* SHA-256 verification for every 4 MB chunk
+* Prebuilt binaries for Linux, macOS, and Windows
+
+---
+
+## Installation
+
+Download the binary for your operating system from the project's Releases page [here](https://github.com/literallyrounak/raft/releases).
+
+No Go installation is required.
+
+---
+
+## Quick start
+
+### Send a file
+
+```bash
+./raft-linux-amd64 share ./movie.mkv
+```
+
+This starts listening on port `9876` and prints an address such as:
+
+```text
+Listening on:
+
+<senders-ip>:9876
+```
+
+Send that address to the receiver.
+
+### Receive a file
+
+```bash
+./raft-linux-amd64 receive <senders-ip>:9876 ./downloads
+```
+
+If the output directory is omitted, the current directory is used.
+
+On Windows, use `raft-windows-amd64.exe`.
+
+On macOS (Apple Silicon), use `raft-darwin-arm64`.
+
+---
 
 ## How it works
 
-One side runs `share`, which opens a TCP listener and waits for a peer to connect. The other side runs `receive` with that address, which connects directly to it. Once connected, everything happens over that one socket - there's no server or relay involved.
+The sender opens a TCP listener and waits for a receiver to connect.
 
-On connect, the sender hashes the file in 4MB chunks (SHA-256) and sends a manifest (filename, size, chunk hashes) to the receiver. The receiver then tells the sender which chunk index to start streaming from. Chunks are streamed in order; the receiver verifies each chunk's hash before writing it to disk, so a corrupted chunk is caught immediately.
+Once connected, the sender scans the file in 4 MB chunks, computes a SHA-256 hash for each chunk, and sends a manifest containing:
 
-Two extra things run alongside the transfer:
+* filename
+* file size
+* chunk hashes
 
-- **Pause/resume during an active transfer** — the receiver can type `p` + Enter to pause and `r` + Enter to resume. This is a live signal sent back to the sender over the same connection; the sender just pauses between chunks until told to continue.
-- **Resume after a disconnect** — the receiver keeps a small `.p2pstate` file next to the output, tracking the last confirmed chunk. If the connection drops (or the receiver is killed) and you run `receive` again, it picks up from where it left off instead of starting over. The state file is removed once the transfer finishes successfully.
+The receiver compares that manifest with any existing partial transfer and tells the sender which chunk index to begin streaming.
+
+Chunks are then transferred in order over the same TCP connection. Every chunk is verified before it's written to disk, so corruption is detected immediately instead of after the transfer finishes.
+
+---
+
+## Resuming interrupted transfers
+
+If the connection drops or the receiver exits, the receiver keeps a small `.p2pstate` file next to the partially downloaded file.
+
+That state records the last successfully verified chunk.
+
+Running the same `receive` command again reconnects to the sender and continues from that chunk instead of starting over.
+
+The state file is deleted automatically once the transfer completes successfully.
+
+---
+
+## Pausing an active transfer
+
+During a transfer, the receiver can control the sender without opening another connection.
+
+* `p` + Enter pauses the transfer.
+* `r` + Enter resumes it.
+
+These commands are sent back to the sender over the existing TCP connection. The sender simply waits between chunks until it's told to continue.
+
+---
+
+## Requirements
+
+Both machines must be able to reach each other on the chosen TCP port (default `9876`).
+
+On the same LAN, this usually means allowing the connection through the operating system's firewall.
+
+Some mobile hotspots isolate connected devices from each other ("AP isolation" or similar). If the receiver cannot connect, check whether client isolation is enabled.
+
+---
+
+## Limitations
+
+* Transfers one file at a time.
+* No NAT traversal or relay server.
+* Connections are currently unencrypted. For untrusted networks, tunnel the connection through SSH or a VPN.
+
+---
 
 ## Project structure
 
-```
+```text
 raft/
-  main.go                        CLI entry point (share / receive subcommands)
-  internal/protocol/protocol.go  wire format: message framing, manifest, chunk encoding
-  internal/transfer/sender.go    sender: hashes file, streams chunks, handles pause signals
-  internal/transfer/receiver.go  receiver: verifies chunks, writes to disk, sends pause/resume
-  internal/transfer/state.go     resume state persistence
-  internal/transfer/gate.go      pause/resume synchronization
-  dist/                          prebuilt binaries (linux, darwin, windows)
+├── main.go
+├── internal/
+│   ├── protocol/
+│   └── transfer/
+└── dist/
 ```
 
-## Usage
+* `main.go`                         - CLI entry point (`share` / `receive`)
+* `internal/protocol`               - wire format and message framing
+* `internal/transfer/sender.go`     - sender implementation
+* `internal/transfer/receiver.go`   - receiver implementation
+* `internal/transfer/state.go`      - resume state persistence
+* `internal/transfer/gate.go`       - pause/resume synchronization
+* `dist/`                           - prebuilt binaries
 
-Prebuilt binaries for Linux, macOS, and Windows are in the [Releases](https://github.com/literallyrounak/raft/releases) page - download the one for your OS, no Go installation needed.
+---
 
-**Sending a file:**
+## Why I built it
 
-```
-./raft-linux-amd64 share ./somefile.mp4
-```
+I wanted something simpler than uploading large files somewhere, starting a temporary HTTP server, or restarting an entire transfer after a dropped connection.
 
-This prints the address it's listening on (default port `9876`). Share that address with whoever's receiving.
-
-**Receiving a file:**
-
-```
-./raft-linux-amd64 receive <sender-ip>:9876 ./downloads
-```
-
-The output directory defaults to the current directory if omitted.
-
-On Windows, use `raft-windows-amd64.exe` instead. On macOS, use `raft-darwin-arm64`.
-
-Both sides need to be reachable from each other on the given port - if you're on the same LAN this is usually just a firewall prompt to allow through. Mobile hotspots sometimes isolate connected devices from each other; disable "AP isolation" or similar if a connection times out.
-
-If a transfer is interrupted, just run the same `receive` command again - it'll resume automatically if a partial file is found.
+`raft` is intentionally small: one sender, one receiver, one TCP connection, and just enough protocol to make interrupted transfers recoverable.
