@@ -1,12 +1,37 @@
-# raft
+<p align="center">
+  <img alt="raft" src="https://shieldcn.dev/header/surface.svg?title=raft&subtitle=CLI+for+transferring+files+directly+between+two+machines+over+TCP.&mode=dark&font=space-grotesk">
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://www.shieldcn.dev/github/stars/literallyrounak/raft.svg?variant=secondary&amp;size=sm&amp;mode=dark">
+    <img alt="GitHub Stars" src="https://www.shieldcn.dev/github/stars/literallyrounak/raft.svg?variant=secondary&amp;size=sm&amp;mode=light">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://www.shieldcn.dev/github/branches/literallyrounak/raft.svg?variant=ghost&amp;size=sm&amp;mode=dark">
+    <img alt="Branches" src="https://www.shieldcn.dev/github/branches/literallyrounak/raft.svg?variant=ghost&amp;size=sm&amp;mode=light">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://www.shieldcn.dev/github/last-commit/literallyrounak/raft.svg?variant=secondary&amp;size=sm&amp;mode=dark">
+    <img alt="Last commit" src="https://www.shieldcn.dev/github/last-commit/literallyrounak/raft.svg?variant=secondary&amp;size=sm&amp;mode=light">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://www.shieldcn.dev/github/commits/literallyrounak/raft.svg?variant=secondary&amp;size=sm&amp;mode=dark">
+    <img alt="Commits" src="https://www.shieldcn.dev/github/commits/literallyrounak/raft.svg?variant=secondary&amp;size=sm&amp;mode=light">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://www.shieldcn.dev/github/release/literallyrounak/raft.svg?size=sm&amp;mode=dark">
+    <img alt="Release" src="https://www.shieldcn.dev/github/release/literallyrounak/raft.svg?size=sm&amp;mode=light">
+  </picture>
+</p>
+
+---
 
 A small CLI for transferring files directly between two machines over TCP.
 
 Run `share` on one machine, `receive` on the other, and the file streams straight from sender to receiver. No cloud upload, no accounts, and no file size limits.
 
 Transfers can be paused while they're running and resumed after a disconnect without retransferring data that's already been verified.
-
----
 
 ## Features
 
