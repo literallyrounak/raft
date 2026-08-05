@@ -16,23 +16,6 @@ Run `share` on one machine, `receive` on the other, and the file streams straigh
 
 Transfers can be paused while they're running and resumed after a disconnect without retransferring data that's already been verified.
 
-## Features
-
-* Direct peer-to-peer file transfer over a single TCP connection
-* Resume interrupted transfers from the last verified chunk
-* Pause and resume an active transfer from the receiver
-* SHA-256 verification for every 4 MB chunk
-* Prebuilt binaries for Linux, macOS, and Windows
-
----
-
-## Installation
-
-Download the binary for your operating system from the project's Releases page [here](https://github.com/literallyrounak/raft/releases).
-
-No Go installation is required.
-
----
 
 ## Quick start
 
@@ -61,11 +44,28 @@ Send that address to the receiver.
 
 If the output directory is omitted, the current directory is used.
 
-On Windows, use `raft-windows-amd64.exe`.
+- On Windows, use `raft-windows-amd64.exe`.
 
-On macOS (Apple Silicon), use `raft-darwin-arm64`.
+- On macOS (Apple Silicon), use `raft-darwin-arm64`.
 
----
+During a transfer, the receiver can control the sender without opening another connection.
+
+* `p` + Enter pauses the transfer.
+* `r` + Enter resumes it.
+
+## Installation
+
+Download the binary for your operating system from the project's Releases page [here](https://github.com/literallyrounak/raft/releases).
+
+No Go installation is required.
+
+## Features
+
+* Direct peer-to-peer file transfer over a single TCP connection
+* Resume interrupted transfers from the last verified chunk
+* Pause and resume an active transfer from the receiver
+* SHA-256 verification for every 4 MB chunk
+* Prebuilt binaries for Linux, macOS, and Windows
 
 ## How it works
 
@@ -81,31 +81,6 @@ The receiver compares that manifest with any existing partial transfer and tells
 
 Chunks are then transferred in order over the same TCP connection. Every chunk is verified before it's written to disk, so corruption is detected immediately instead of after the transfer finishes.
 
----
-
-## Resuming interrupted transfers
-
-If the connection drops or the receiver exits, the receiver keeps a small `.p2pstate` file next to the partially downloaded file.
-
-That state records the last successfully verified chunk.
-
-Running the same `receive` command again reconnects to the sender and continues from that chunk instead of starting over.
-
-The state file is deleted automatically once the transfer completes successfully.
-
----
-
-## Pausing an active transfer
-
-During a transfer, the receiver can control the sender without opening another connection.
-
-* `p` + Enter pauses the transfer.
-* `r` + Enter resumes it.
-
-These commands are sent back to the sender over the existing TCP connection. The sender simply waits between chunks until it's told to continue.
-
----
-
 ## Requirements
 
 Both machines must be able to reach each other on the chosen TCP port (default `9876`).
@@ -114,15 +89,11 @@ On the same LAN, this usually means allowing the connection through the operatin
 
 Some mobile hotspots isolate connected devices from each other ("AP isolation" or similar). If the receiver cannot connect, check whether client isolation is enabled.
 
----
-
 ## Limitations
 
 * Transfers one file at a time.
 * No NAT traversal or relay server.
 * Connections are currently unencrypted. For untrusted networks, tunnel the connection through SSH or a VPN.
-
----
 
 ## Project structure
 
@@ -132,7 +103,10 @@ raft/
 ├── internal/
 │   ├── protocol/
 │   └── transfer/
-└── dist/
+|   └── ui/
+├── go.mod
+├── demo.gif
+└── README.md
 ```
 
 * `main.go`                         - CLI entry point (`share` / `receive`)
@@ -141,9 +115,7 @@ raft/
 * `internal/transfer/receiver.go`   - receiver implementation
 * `internal/transfer/state.go`      - resume state persistence
 * `internal/transfer/gate.go`       - pause/resume synchronization
-* `dist/`                           - prebuilt binaries
-
----
+* `internal/ui/model.go`            - bubbletea models & lipgloss styles
 
 ## Why I built it
 
