@@ -1,39 +1,39 @@
 package transfer
 
 import (
-	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"raft/internal/protocol"
+	"raft/internal/ui"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
-func Receive(addr string, outDir string) error {
+func Receive(addr string, outDir string, msgs chan<- tea.Msg) error {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("connecting to %s: %w", addr, err)
+		return err
 	}
 	defer conn.Close()
 
+	msgs <- ui.PeerConnectedMsg{Addr: addr}
+
 	msgType, payload, err := protocol.ReadFrame(conn)
 	if err != nil {
-		return fmt.Errorf("reading handshake: %w", err)
+		return err
 	}
 	if msgType != protocol.MsgHandshake {
-		return fmt.Errorf("expected handshake, got message type %d", msgType)
+		return nil
 	}
 
 	manifest, err := protocol.DecodeManifest(payload)
 	if err != nil {
-		return fmt.Errorf("decoding manifest: %w", err)
+		return err
 	}
-
-	fmt.Printf("receiving %s (%d bytes, %d chunks)\n", manifest.FileName, manifest.FileSize, len(manifest.ChunkHashes))
 
 	outPath := filepath.Join(outDir, manifest.FileName)
 	transferID := manifestTransferID(manifest)
@@ -41,7 +41,6 @@ func Receive(addr string, outDir string) error {
 	startIndex := uint32(0)
 	if st, err := loadTransferState(outPath); err == nil && st.TransferID == transferID {
 		startIndex = st.NextIndex
-		fmt.Printf("resuming transfer from chunk %d\n", startIndex)
 	}
 
 	openFlags := os.O_CREATE | os.O_RDWR
@@ -50,21 +49,27 @@ func Receive(addr string, outDir string) error {
 	}
 	outFile, err := os.OpenFile(outPath, openFlags, 0644)
 	if err != nil {
-		return fmt.Errorf("creating output file: %w", err)
+		return err
 	}
 	defer outFile.Close()
 
 	if err := protocol.WriteFrame(conn, protocol.MsgStartFrom, protocol.EncodeIndex(startIndex)); err != nil {
-		return fmt.Errorf("sending start-from: %w", err)
+		return err
 	}
 
-	fmt.Println("type 'p' + enter to pause, 'r' + enter to resume")
-	go listenForPauseInput(conn)
+	msgs <- ui.FileInfoMsg{
+		Name:  manifest.FileName,
+		Size:  manifest.FileSize,
+		Total: len(manifest.ChunkHashes),
+	}
+
+	transferred := int64(startIndex) * manifest.ChunkSize
+	msgs <- ui.ProgressMsg{Transferred: transferred}
 
 	for {
 		msgType, payload, err := protocol.ReadFrame(conn)
 		if err != nil {
-			return fmt.Errorf("reading frame: %w", err)
+			return err
 		}
 
 		if msgType == protocol.MsgComplete {
@@ -72,52 +77,45 @@ func Receive(addr string, outDir string) error {
 		}
 
 		if msgType != protocol.MsgChunk {
-			return fmt.Errorf("unexpected message type %d", msgType)
+			continue
 		}
 
 		index, data, err := protocol.DecodeChunk(payload)
 		if err != nil {
-			return fmt.Errorf("decoding chunk: %w", err)
+			return err
 		}
 
 		if int(index) >= len(manifest.ChunkHashes) {
-			return fmt.Errorf("chunk index %d out of range", index)
+			continue
 		}
 
 		sum := sha256.Sum256(data)
-		gotHash := hex.EncodeToString(sum[:])
-		wantHash := manifest.ChunkHashes[index]
-		if gotHash != wantHash {
-			return fmt.Errorf("chunk %d failed integrity check", index)
+		if hex.EncodeToString(sum[:]) != manifest.ChunkHashes[index] {
+			return nil
 		}
 
 		offset := int64(index) * manifest.ChunkSize
 		if _, err := outFile.WriteAt(data, offset); err != nil {
-			return fmt.Errorf("writing chunk %d: %w", index, err)
+			return err
 		}
 
 		if err := saveTransferState(outPath, transferState{TransferID: transferID, NextIndex: index + 1}); err != nil {
-			return fmt.Errorf("saving transfer state: %w", err)
+			return err
 		}
 
-		fmt.Printf("\rreceived chunk %d/%d", index+1, len(manifest.ChunkHashes))
+		transferred += int64(len(data))
+		msgs <- ui.ProgressMsg{Transferred: transferred}
 	}
 
 	deleteTransferState(outPath)
-	fmt.Println()
-	fmt.Printf("saved to %s\n", outPath)
+	msgs <- ui.DoneMsg{OutPath: outPath}
 	return nil
 }
 
-func listenForPauseInput(conn net.Conn) {
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		switch line {
-		case "p":
-			protocol.WriteFrame(conn, protocol.MsgPause, nil)
-		case "r":
-			protocol.WriteFrame(conn, protocol.MsgResume, nil)
-		}
-	}
+func SendPause(conn net.Conn) error {
+	return protocol.WriteFrame(conn, protocol.MsgPause, nil)
+}
+
+func SendResume(conn net.Conn) error {
+	return protocol.WriteFrame(conn, protocol.MsgResume, nil)
 }

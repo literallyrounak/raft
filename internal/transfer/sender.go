@@ -3,47 +3,50 @@ package transfer
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 
 	"raft/internal/protocol"
+	"raft/internal/ui"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
-func Share(filePath string, addr string) error {
+func Share(filePath string, addr string, msgs chan<- tea.Msg) error {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return fmt.Errorf("opening file: %w", err)
+		return err
 	}
 	defer file.Close()
 
 	info, err := file.Stat()
 	if err != nil {
-		return fmt.Errorf("stat file: %w", err)
+		return err
 	}
 
+	msgs <- ui.StatusMsg{Status: ui.StatusHashing}
 	hashes, err := computeChunkHashes(file, info.Size())
 	if err != nil {
-		return fmt.Errorf("hashing file: %w", err)
+		return err
 	}
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("listening on %s: %w", addr, err)
+		return err
 	}
 	defer listener.Close()
 
-	fmt.Printf("waiting for a peer on %s\n", listener.Addr().String())
+	msgs <- ui.StatusMsg{Status: ui.StatusWaiting}
 
 	conn, err := listener.Accept()
 	if err != nil {
-		return fmt.Errorf("accepting connection: %w", err)
+		return err
 	}
 	defer conn.Close()
 
-	fmt.Printf("peer connected: %s\n", conn.RemoteAddr().String())
+	msgs <- ui.PeerConnectedMsg{Addr: conn.RemoteAddr().String()}
 
 	manifest := protocol.Manifest{
 		FileName:    filepath.Base(filePath),
@@ -54,36 +57,41 @@ func Share(filePath string, addr string) error {
 
 	manifestBytes, err := protocol.EncodeManifest(manifest)
 	if err != nil {
-		return fmt.Errorf("encoding manifest: %w", err)
+		return err
 	}
 
 	if err := protocol.WriteFrame(conn, protocol.MsgHandshake, manifestBytes); err != nil {
-		return fmt.Errorf("sending handshake: %w", err)
+		return err
 	}
 
 	startIndex, err := readStartFrom(conn)
 	if err != nil {
-		return fmt.Errorf("reading start-from: %w", err)
+		return err
+	}
+
+	msgs <- ui.FileInfoMsg{
+		Name:  manifest.FileName,
+		Size:  info.Size(),
+		Total: len(hashes),
 	}
 
 	startOffset := int64(startIndex) * protocol.ChunkSize
 	if _, err := file.Seek(startOffset, io.SeekStart); err != nil {
-		return fmt.Errorf("seeking file: %w", err)
+		return err
 	}
 
-	gate := newPauseGate()
-	controlErrCh := make(chan error, 1)
-	go listenForControlMessages(conn, gate, controlErrCh)
+	gate := newPauseGate(msgs)
+	go listenForControlMessages(conn, gate)
 
-	if err := sendChunks(conn, file, len(hashes), startIndex, gate); err != nil {
-		return fmt.Errorf("sending chunks: %w", err)
+	if err := sendChunks(conn, file, info.Size(), startOffset, startIndex, gate, msgs); err != nil {
+		return err
 	}
 
 	if err := protocol.WriteFrame(conn, protocol.MsgComplete, nil); err != nil {
-		return fmt.Errorf("sending complete: %w", err)
+		return err
 	}
 
-	fmt.Println("transfer complete")
+	msgs <- ui.DoneMsg{}
 	return nil
 }
 
@@ -93,24 +101,21 @@ func readStartFrom(conn net.Conn) (uint32, error) {
 		return 0, err
 	}
 	if msgType != protocol.MsgStartFrom {
-		return 0, fmt.Errorf("expected start-from, got message type %d", msgType)
+		return 0, nil
 	}
 	return protocol.DecodeIndex(payload)
 }
 
-func listenForControlMessages(conn net.Conn, gate *pauseGate, errCh chan<- error) {
+func listenForControlMessages(conn net.Conn, gate *pauseGate) {
 	for {
 		msgType, _, err := protocol.ReadFrame(conn)
 		if err != nil {
-			errCh <- err
 			return
 		}
 		switch msgType {
 		case protocol.MsgPause:
-			fmt.Println("\npeer requested pause")
 			gate.Pause()
 		case protocol.MsgResume:
-			fmt.Println("\npeer requested resume")
 			gate.Resume()
 		}
 	}
@@ -137,9 +142,10 @@ func computeChunkHashes(file *os.File, size int64) ([]string, error) {
 	return hashes, nil
 }
 
-func sendChunks(conn net.Conn, file *os.File, totalChunks int, startIndex uint32, gate *pauseGate) error {
+func sendChunks(conn net.Conn, file *os.File, fileSize int64, startOffset int64, startIndex uint32, gate *pauseGate, msgs chan<- tea.Msg) error {
 	buf := make([]byte, protocol.ChunkSize)
 	index := startIndex
+	transferred := startOffset
 
 	for {
 		n, err := file.Read(buf)
@@ -149,7 +155,8 @@ func sendChunks(conn net.Conn, file *os.File, totalChunks int, startIndex uint32
 			if writeErr := protocol.WriteFrame(conn, protocol.MsgChunk, payload); writeErr != nil {
 				return writeErr
 			}
-			fmt.Printf("\rsent chunk %d/%d", index+1, totalChunks)
+			transferred += int64(n)
+			msgs <- ui.ProgressMsg{Transferred: transferred}
 			index++
 		}
 		if err == io.EOF {
@@ -159,6 +166,5 @@ func sendChunks(conn net.Conn, file *os.File, totalChunks int, startIndex uint32
 			return err
 		}
 	}
-	fmt.Println()
 	return nil
 }

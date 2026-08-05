@@ -5,6 +5,9 @@ import (
 	"os"
 
 	"raft/internal/transfer"
+	"raft/internal/ui"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
@@ -36,7 +39,17 @@ func runShare(args []string) {
 		addr = args[1]
 	}
 
-	if err := transfer.Share(filePath, addr); err != nil {
+	msgs := make(chan tea.Msg, 64)
+	model := ui.New(ui.ModeSend, addr, msgs)
+
+	go func() {
+		if err := transfer.Share(filePath, addr, msgs); err != nil {
+			msgs <- ui.ErrorMsg{Err: err}
+		}
+	}()
+
+	p := tea.NewProgram(model)
+	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -54,16 +67,26 @@ func runReceive(args []string) {
 		outDir = args[1]
 	}
 
-	if err := transfer.Receive(addr, outDir); err != nil {
+	msgs := make(chan tea.Msg, 64)
+	model := ui.New(ui.ModeReceive, addr, msgs)
+
+	go func() {
+		if err := transfer.Receive(addr, outDir, msgs); err != nil {
+			msgs <- ui.ErrorMsg{Err: err}
+		}
+	}()
+
+	p := tea.NewProgram(model)
+	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func printUsage() {
-	fmt.Println("raft - direct device-to-device file transfer")
+	fmt.Println("raft — direct device-to-device file transfer")
 	fmt.Println()
 	fmt.Println("usage:")
-	fmt.Println("  raft share <file> [listen-addr]     (default listen-addr :9876)")
-	fmt.Println("  raft receive <addr> [out-dir]       (default out-dir .)")
+	fmt.Println("  raft share <file> [listen-addr]     (default :9876)")
+	fmt.Println("  raft receive <addr> [out-dir]       (default current directory)")
 }
