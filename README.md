@@ -19,6 +19,14 @@ Transfers can be paused while they're running and resumed after a disconnect wit
 
 ## Quick start
 
+### Set up permissions
+
+In the folder where the binary is present,
+
+```bash
+chmod +x raft-linux-amd64
+```
+
 ### Send a file
 
 ```bash
@@ -65,6 +73,7 @@ No Go installation is required.
 * Resume interrupted transfers from the last verified chunk
 * Pause and resume an active transfer from the receiver
 * SHA-256 verification for every 4 MB chunk
+* Bubbletea modern Terminal User Interface
 * Prebuilt binaries for Linux, macOS, and Windows
 
 ## How it works
