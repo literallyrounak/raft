@@ -40,7 +40,8 @@ func runShare(args []string) {
 	}
 
 	msgs := make(chan tea.Msg, 64)
-	model := ui.New(ui.ModeSend, addr, msgs)
+	ctrl := make(chan ui.ControlCmd, 4)
+	model := ui.New(ui.ModeSend, addr, msgs, ctrl)
 
 	go func() {
 		if err := transfer.Share(filePath, addr, msgs); err != nil {
@@ -68,10 +69,11 @@ func runReceive(args []string) {
 	}
 
 	msgs := make(chan tea.Msg, 64)
-	model := ui.New(ui.ModeReceive, addr, msgs)
+	ctrl := make(chan ui.ControlCmd, 4)
+	model := ui.New(ui.ModeReceive, addr, msgs, ctrl)
 
 	go func() {
-		if err := transfer.Receive(addr, outDir, msgs); err != nil {
+		if err := transfer.Receive(addr, outDir, msgs, ctrl); err != nil {
 			msgs <- ui.ErrorMsg{Err: err}
 		}
 	}()

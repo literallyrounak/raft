@@ -13,12 +13,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func Receive(addr string, outDir string, msgs chan<- tea.Msg) error {
+func Receive(addr string, outDir string, msgs chan<- tea.Msg, ctrl <-chan ui.ControlCmd) error {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
+
+	go forwardControlCmds(conn, ctrl)
 
 	msgs <- ui.PeerConnectedMsg{Addr: addr}
 
@@ -112,10 +114,13 @@ func Receive(addr string, outDir string, msgs chan<- tea.Msg) error {
 	return nil
 }
 
-func SendPause(conn net.Conn) error {
-	return protocol.WriteFrame(conn, protocol.MsgPause, nil)
-}
-
-func SendResume(conn net.Conn) error {
-	return protocol.WriteFrame(conn, protocol.MsgResume, nil)
+func forwardControlCmds(conn net.Conn, ctrl <-chan ui.ControlCmd) {
+	for cmd := range ctrl {
+		switch cmd {
+		case ui.CmdPause:
+			protocol.WriteFrame(conn, protocol.MsgPause, nil)
+		case ui.CmdResume:
+			protocol.WriteFrame(conn, protocol.MsgResume, nil)
+		}
+	}
 }

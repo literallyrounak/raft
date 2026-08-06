@@ -29,6 +29,13 @@ const (
 
 const progressBarWidth = 32
 
+type ControlCmd int
+
+const (
+	CmdPause  ControlCmd = iota
+	CmdResume ControlCmd = iota
+)
+
 type PeerConnectedMsg struct{ Addr string }
 type FileInfoMsg struct {
 	Name  string
@@ -54,14 +61,16 @@ type Model struct {
 	errMsg      string
 	outPath     string
 	msgs        <-chan tea.Msg
+	ctrl        chan<- ControlCmd
 }
 
-func New(mode Mode, addr string, msgs <-chan tea.Msg) Model {
+func New(mode Mode, addr string, msgs <-chan tea.Msg, ctrl chan<- ControlCmd) Model {
 	return Model{
 		mode:   mode,
 		addr:   addr,
 		status: StatusWaiting,
 		msgs:   msgs,
+		ctrl:   ctrl,
 	}
 }
 
@@ -92,12 +101,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "p":
-			if m.status == StatusTransferring {
+			if m.status == StatusTransferring && m.ctrl != nil {
+				m.ctrl <- CmdPause
 				m.status = StatusPaused
 				return m, tea.Batch(waitForMsg(m.msgs), tick())
 			}
 		case "r":
-			if m.status == StatusPaused {
+			if m.status == StatusPaused && m.ctrl != nil {
+				m.ctrl <- CmdResume
 				m.status = StatusTransferring
 				return m, tea.Batch(waitForMsg(m.msgs), tick())
 			}
